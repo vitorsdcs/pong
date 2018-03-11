@@ -1,0 +1,413 @@
+package org.anhembi.cg.pong;
+
+import java.awt.*;
+import java.awt.event.*;
+import java.util.Random;
+
+import javax.swing.*;
+import javax.media.opengl.GL2;
+import javax.media.opengl.GLAutoDrawable;
+import javax.media.opengl.GLEventListener;
+import javax.media.opengl.awt.GLCanvas;
+import javax.media.opengl.glu.GLU;
+
+import com.jogamp.opengl.util.gl2.GLUT;
+import com.jogamp.opengl.util.FPSAnimator;
+
+
+@SuppressWarnings("serial")
+public class Pong extends GLCanvas implements GLEventListener, KeyListener{
+
+	private GL2 gl;
+	private GLU glu;
+	private GLUT glut;
+	
+	private int vidas = 5;
+	private int pontuacao = 0;
+	private int fase = 1;
+	private boolean pausado = false;
+	private boolean reiniciar = false;
+	private boolean gameover = false;
+	private boolean tutorial = true;
+	private float bastaoX = 0.0f;
+	private float bolaX = 0.0f;
+	private float bolaY = 0.0f;
+	private int bolaDirecaoX = 1;
+	private int bolaDirecaoY = 1;
+	private final int BOLA_DIRECAO_CIMA = 1;
+	private final int BOLA_DIRECAO_BAIXO = 0;
+	private final int BOLA_DIRECAO_DIREITA = 1;
+	private final int BOLA_DIRECAO_ESQUERDA = 0;
+	
+	//Para definir as Coordenadas do sistema
+	float xMin, xMax, yMin, yMax;
+
+	// Define constants for the top-level container
+	private static String TITULO = "PONG";
+	private static final int FPS = 60; // define frames per second para a animacao
+
+	public static void main(String[] args) {
+		SwingUtilities.invokeLater(new Runnable() {
+			@Override
+			public void run() {
+				// Cria a janela de renderizacao OpenGL
+				GLCanvas canvas = new Pong();
+				//canvas.setPreferredSize(new Dimension(CANVAS_LARGURA, CANVAS_ALTURA));
+				final FPSAnimator animator = new FPSAnimator(canvas, FPS, true);
+				final JFrame frame = new JFrame(); 
+				
+				frame.getContentPane().add(canvas);
+				frame.addWindowListener(new WindowAdapter() {
+					@Override
+					public void windowClosing(WindowEvent e) {
+						new Thread() {
+							@Override
+							public void run() {
+								if (animator.isStarted())
+									animator.stop();
+								System.exit(0);
+							}
+						}.start();
+					}
+				});
+				frame.setTitle(TITULO);
+				frame.pack();
+				frame.setLocationRelativeTo(null); //Center frame
+				frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+				frame.setVisible(true);
+				animator.start(); // inicia o loop de animacao
+			}
+		});
+	}
+
+
+	/** Construtor da classe */
+	public Pong() {
+		this.addGLEventListener(this);
+	}
+
+	/**
+	 *Chamado uma vez quando o contexto OpenGL eh criado
+	 */
+	@Override
+	public void init(GLAutoDrawable drawable) {		
+		gl = drawable.getGL().getGL2(); // obtem o contexto grafico OpenGL	
+		glu = new GLU(); 
+		
+		// Estabelece as coordenadas do SRU (Sistema de Referencia do Universo)
+		xMin = -1;
+		xMax = 1;
+		yMin = -1;
+		yMax = 1;
+		
+		((Component) drawable).addKeyListener(this);
+	}
+
+	/**
+	 * Chamado quando a janela eh redimensionada
+	 */
+	@Override
+	public void reshape(GLAutoDrawable drawable, int x, int y, int width,
+			int height) {		
+		gl = drawable.getGL().getGL2(); // obtem o contexto grafico OpenGL
+
+		// Ativa a matriz de projecao
+		gl.glMatrixMode(GL2.GL_PROJECTION);
+		gl.glLoadIdentity();
+		// Projecao ortogonal 2D
+		glu.gluOrtho2D(xMin, xMax, yMin, yMax);
+
+		// Ativa a matriz de modelagem
+		gl.glMatrixMode(GL2.GL_MODELVIEW);
+		System.out.println("Reshape: " + width + " " + height);
+	}
+
+	/**
+	 * Chamado para renderizar a imagem do GLCanvas pelo animator
+	 */
+	@Override
+	public void display(GLAutoDrawable drawable) {		
+		gl = drawable.getGL().getGL2(); // obtem o contexto grafico OpenGL		
+		glut = new GLUT();
+		
+		// Especifica que a cor para limpar a janela de visualizacao eh preta
+		gl.glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+
+		// Limpa a janela de visualizacao com a cor de fundo especificada
+		gl.glClear(GL2.GL_COLOR_BUFFER_BIT | GL2.GL_DEPTH_BUFFER_BIT);
+
+		
+		//Redefine a matriz atual com a matriz "identidade"
+		gl.glLoadIdentity();
+		
+		reiniciar();
+		exibeTutorial();
+		exibeFase();
+		exibeVidas();
+		exibePontuacao();
+		exibeGameover();
+		exibePause();
+		criaBastao();
+		criaBola();
+		
+		// Executa os comandos OpenGL
+		gl.glFlush();
+	}
+	
+	private void exibeTutorial() {
+		if (tutorial) {
+			gl.glColor3f(0, 0, 0);
+			gl.glRasterPos2f(-0.9f, 0.9f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_18, "PONG");
+			gl.glRasterPos2f(-0.9f, 0.8f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "Controle o bastão e rebata a bola para pontuar.");
+			gl.glRasterPos2f(-0.9f, 0.7f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "Para cada rebatida você ganha 10 pontos; se errar, perde uma vida.");
+			gl.glRasterPos2f(-0.9f, 0.6f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "O jogo acaba quando todas as 5 vidas forem perdidas.");
+			gl.glRasterPos2f(-0.9f, 0.5f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "Setas esquerda e direita: controla o bastão");
+			gl.glRasterPos2f(-0.9f, 0.4f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "Enter: pausa e retoma o jogo");
+			gl.glRasterPos2f(-0.9f, 0.3f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "Espaço: inicia um novo jogo");
+			
+			gl.glColor3f(1, 0, 0);
+			gl.glRasterPos2f(-0.9f, 0.2f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "PRESSIONE ESPAÇO PARA INICIAR O JOGO");
+		}
+	}
+	
+	private void criaBastao() {
+		if (tutorial) return;
+		
+		gl.glPushMatrix();
+			gl.glTranslatef(bastaoX, 0, 0);
+			gl.glColor3f(0, 0, 0);
+			gl.glBegin(GL2.GL_QUADS);
+				gl.glVertex2f(-0.1f, -0.9f);
+				gl.glVertex2f(0.1f, -0.9f);
+				gl.glVertex2f(0.1f, -1.0f);
+				gl.glVertex2f(-0.1f, -1.0f);
+			gl.glEnd();
+		gl.glPopMatrix();
+	}
+	
+	private void criaBola() {
+		if (tutorial) return;
+		
+		movimentaBola();
+		
+		gl.glPushMatrix();
+			gl.glTranslatef(bolaX, bolaY, 0);
+			gl.glColor3f(0, 0, 0);
+			gl.glBegin(GL2.GL_QUADS);
+				gl.glVertex2f(-0.01f, -0.01f);
+				gl.glVertex2f(0.0f, -0.01f);
+				gl.glVertex2f(0.0f, 0.01f);
+				gl.glVertex2f(-0.01f, 0.01f);
+			gl.glEnd();
+		gl.glPopMatrix();
+	}
+	
+	private void movimentaBola() {
+		if (verificaColisao()) {
+			bolaDirecaoX = bolaX > 0 ? BOLA_DIRECAO_ESQUERDA : BOLA_DIRECAO_DIREITA;
+			bolaDirecaoY = bolaY > 0 ? BOLA_DIRECAO_BAIXO : BOLA_DIRECAO_CIMA;
+		}
+		
+		switch (bolaDirecaoX) {
+		    case BOLA_DIRECAO_DIREITA:
+		    	bolaX += 0.1f * 0.2 + numeroEntre(1, 9) * 0.001;
+		    	break;
+		    case BOLA_DIRECAO_ESQUERDA:
+		    	bolaX -= 0.1f * 0.2 + numeroEntre(1, 9) * 0.001;
+		    	break;
+		}
+		
+	    switch (bolaDirecaoY) {
+		    case BOLA_DIRECAO_CIMA:
+		    	bolaY += 0.1f * 0.2 + numeroEntre(1, 9) * 0.001;
+		    	break;
+		    case BOLA_DIRECAO_BAIXO:
+		    	bolaY -= 0.1f * 0.2 + numeroEntre(1, 9) * 0.001;
+		    	break;
+	    }
+	    
+	    System.out.println("bolaX: " + bolaX);
+	    System.out.println("bolaY: " + bolaY);
+	}
+	
+	private float numeroEntre(int min, int max) {
+		return new Random().nextInt((max - min) + 1) + min;
+	}
+	
+	private boolean verificaColisao() {
+		boolean colisaoX = bolaX >= 1.0f || bolaX <= -1.0f;
+		boolean colisaoY = bolaY >= 1.0f || bolaY <= -1.0f;
+		boolean colisaoBastao = false;
+		boolean colisaoObjeto = false;
+		return colisaoX || colisaoY || colisaoBastao || colisaoObjeto;
+	}
+	
+	private char colisao() {
+		if (bolaX >= 1.0f || bolaX <= -1.0f) return 'X';
+		if (bolaY >= 1.0f || bolaY <= -1.0f) return 'Y';
+	}
+	
+	private void exibeFase() {
+		if (tutorial) return;
+		
+		gl.glColor3f(0, 0, 0);
+		gl.glRasterPos2f(-0.95f, 0.9f);
+		glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "Fase: " + fase);
+	}
+	
+	private void exibePontuacao() {
+		if (tutorial) return;
+		
+		gl.glColor3f(0, 0, 0);
+		gl.glRasterPos2f(-0.95f, 0.8f);
+		glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "Pontuação: " + pontuacao);
+	}
+	
+	private void exibeVidas() {
+		if (tutorial) return;
+		
+		gl.glColor3f(0, 0, 0);
+		gl.glRasterPos2f(-0.95f, 0.85f);
+		glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "Vidas:");
+		for (int i = 1; i <= 5; i++) {
+			exibeVida(i);
+		}
+		
+		if (vidas == 0) {
+			pausado = true;
+			gameover = true;
+		}
+	}
+	
+	private void exibeVida(int pos) {
+		if (tutorial) return;
+		
+		gl.glPushMatrix();
+			if (pos > vidas)
+				gl.glColor3f(1, 1, 1);
+			else
+				gl.glColor3f(1, 0, 0);
+			
+			gl.glBegin(GL2.GL_QUADS);
+				gl.glVertex2f(-0.92f + (pos * 0.025f), 0.85f);
+				gl.glVertex2f(-0.91f + (pos * 0.025f), 0.85f);
+				gl.glVertex2f(-0.91f + (pos * 0.025f), 0.87f);
+				gl.glVertex2f(-0.92f + (pos * 0.025f), 0.87f);
+			gl.glEnd();
+		gl.glPopMatrix();
+	}
+	
+	private void exibeGameover() {
+		if (tutorial) return;
+		
+		if (gameover) {
+			gl.glColor3f(0, 0, 0);
+			gl.glRasterPos2f(-0.1f, 0.0f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "GAME OVER");
+		}
+	}
+	
+	private void reiniciar() {
+		if (tutorial) return;
+		
+		if (reiniciar) {
+			vidas = 5;
+			pontuacao = 0;
+			fase = 1;
+			pausado = false;
+			reiniciar = false;
+			gameover = false;
+			tutorial = false;
+			bastaoX = 0;
+		}
+	}
+	
+	private void exibePause() {
+		if (tutorial) return;
+		
+		if (pausado && !gameover) {
+			gl.glColor3f(0, 0, 0);
+			gl.glRasterPos2f(-0.1f, 0.0f);
+			glut.glutBitmapString(GLUT.BITMAP_HELVETICA_12, "PAUSADO");
+		}
+	}
+
+	/**
+	 * Chamado quando o contexto OpenGL eh destruido
+	 */
+	@Override
+	public void dispose(GLAutoDrawable drawable) {
+	}
+
+
+	@Override
+	public void keyPressed(KeyEvent e) {
+		int keyCode = e.getKeyCode();
+		switch(keyCode){
+			case KeyEvent.VK_ESCAPE:
+				System.exit(0);
+				break;
+			case KeyEvent.VK_LEFT:
+				if (pausado || tutorial) return;
+				
+				if (bastaoX > -0.9f) {
+					bastaoX -= 0.1f;
+				}
+				break;
+			case KeyEvent.VK_RIGHT:
+				if (pausado || tutorial) return;
+				
+				if (bastaoX < 0.9f) {
+					bastaoX += 0.1f;
+				}
+				break;
+			case KeyEvent.VK_ENTER:
+				if (gameover || tutorial) return;
+				
+				pausado = !pausado;
+				break;
+			case KeyEvent.VK_SPACE:
+				tutorial = false;
+				reiniciar = true;
+				break;
+				
+			// @TODO remover testes
+			case KeyEvent.VK_R:
+				if (pausado || tutorial) return;
+				
+				vidas -= 1;
+				break;
+			case KeyEvent.VK_T:
+				if (pausado || tutorial) return;
+				
+				pontuacao += 10;
+				
+				if (pontuacao == 200) {
+					fase = 2;
+				}
+				break;
+				
+		}
+		
+	}
+	
+	@Override
+	public void keyTyped(KeyEvent e) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void keyReleased(KeyEvent e) {
+		// TODO Auto-generated method stub
+		
+	}
+}
